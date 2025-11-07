@@ -1,0 +1,3 @@
+recursive-include xflow/framework/statics *
+include requirements.txt
+include README*
