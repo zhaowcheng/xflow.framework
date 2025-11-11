@@ -17,3 +17,10 @@ class SSHCommandError(Exception):
     SSH 命令错误。
     """
     pass
+
+
+class NoSuchNodeError(Exception):
+    """
+    无此节点。
+    """
+    pass

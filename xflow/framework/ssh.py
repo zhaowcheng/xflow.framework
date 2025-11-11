@@ -4,11 +4,9 @@
 SSH 模块。
 """
 
-import time
 import socket
 
 from typing import Generator, Optional
-from threading import Lock, current_thread
 from select import select
 from contextlib import contextmanager
 
@@ -18,13 +16,9 @@ from paramiko.ssh_exception import (AuthenticationException,
                                     NoValidConnectionsError, 
                                     SSHException)
 
-from xflow.framework.logger import getlogger
 from xflow.framework.errors import SSHConnectError, SSHCommandError
 from xflow.framework.utils import (remove_ansi_escape_chars, 
                                    remove_unprintable_chars)
-
-
-logger = getlogger(__name__)
 
 
 @decorator
@@ -143,8 +137,7 @@ class SSHConnection(object):
         user: str,
         password: str,
         port: int = 22,
-        envs: dict = {},
-        initcmd: Optional[str] = None
+        envs: Optional[dict] = None
     ):
         """
         :param ip: IP 地址。
@@ -154,19 +147,16 @@ class SSHConnection(object):
         :param envs: 连接的默认环境变量，其中：
             `LANG` 默认值为 `en_US.UTF-8`。
             `LANGUAGE` 默认值为 `en_US.UTF-8`。
-        :param initcmd: 初始化命令，连接时执行。
         """
         self._ip = ip
         self._user = user
         self._password = password
         self._port = port
-        self._envs = envs
-        self._initcmd = initcmd
+        self._envs = envs or {}
+        self._connstr = f'ssh://{user}@{ip}:{port}'
+        self._cwd: str = ''
         self._sshclient = SSHClient()
         self._sshclient.set_missing_host_key_policy(AutoAddPolicy())
-        self._openlock = Lock()
-        self._cdlocks: dict[str, Lock] = {}
-        self._cwds: dict[str, str] = {}
         for k, v in {'LANG': 'en_US.UTF-8',
                      'LANGUAGE': 'en_US.UTF-8'}.items():
             self._envs[k] = self._envs.get(k, v)
@@ -175,20 +165,17 @@ class SSHConnection(object):
         """
         开启连接。
         """
+        transport = self._sshclient.get_transport()
+        if transport and transport.active:
+            return
         timeout = 10
-        self._openlock.acquire()
         try:
-            transport = self._sshclient.get_transport()
-            if transport and transport.active:
-                return
-            logger.info('Connecting...')
+            print(f'[{self._connstr}] Connecting...')
             self._sshclient.connect(self._ip, 
                                     port=self._port, 
                                     username=self._user, 
                                     password=self._password, 
                                     timeout=10)
-            if self._initcmd:
-                self._sshclient.exec_command(self._initcmd)
         except AuthenticationException:
             raise SSHConnectError(
                 f'Authentication failed when SSH connect to {self._ip} with user `{self._user}`, '
@@ -212,8 +199,6 @@ class SSHConnection(object):
                     f'on {self._ip}, please check whether the port is correct.'
                 ) from None
             raise e from None
-        finally:
-            self._openlock.release
 
     def close(self) -> None:
         """
@@ -243,28 +228,23 @@ class SSHConnection(object):
         >>> exec('cd /errpath')  # SSHCommandError                                                              # doctest: +SKIP
         >>> exec('passwd xflow', prompts={'New password:': 'xflow@123', 'Retype new password:': 'xflow@123'})   # doctest: +SKIP
         """
-        tdname = current_thread().name
-        cwd = self._cwds.get(tdname)
-        if cwd:
-            cmd = f'cd {cwd} && {cmd}'
-        cmdid = time.time()
-        logprefix = f'[cmdid: {cmdid}]'
-        logger.info(f'{logprefix} {cmd}')
+        if self._cwd:
+            cmd = f'cd {self._cwd} && {cmd}'
         environment = self._envs.copy()
         environment.update(envs)
+        print(f'[{self._connstr}] {cmd}')
         stdin, stdout, _ = self._sshclient.exec_command(
             cmd, get_pty=True, environment=environment)
         output = ''
         encoding = envs['LANG'].split('.')[-1]
         while True:
-            rlist, _, _ = select([stdout], [], [])
-            if stdout in rlist:
-                line: str = stdout.readline().decode(encoding=encoding, 
-                                                     errors='ignore')
-                output += line
-                if not line:
+            rlist, _, _ = select([stdout.channel], [], [], 0.1)
+            if stdout.channel in rlist:
+                data = stdout.channel.recv(1024).decode(encoding=encoding, errors='ignore')
+                if data == '':
                     break
-                logger.info(f'{logprefix} {line.rstrip()}')
+                output += data
+                print(data, end='')
             if prompts and output:
                 lastline = output.splitlines()[-1]
                 written = None
@@ -278,8 +258,7 @@ class SSHConnection(object):
                     prompts.pop(written)
         rc = stdout.channel.recv_exit_status()
         if rc != 0:
-            logger.error(f'{logprefix} Exit code: {rc}')
-            raise SSHCommandError(f'Exit code of command(id: {cmdid}) is not 0.')
+            raise SSHCommandError(f'Exit code of `{cmd}` = {rc}.')
         return SSHCommandResult(output, rc=rc, cmd=cmd)
 
     def sudo(self, cmd, *args, **kwargs) -> SSHCommandResult:
@@ -300,12 +279,8 @@ class SSHConnection(object):
         >>> d                           # doctest: +SKIP
         '/my/workdir'                   # doctest: +SKIP
         """
-        tdname = current_thread().name
-        self._cdlocks.setdefault(tdname, Lock()).acquire()
         try:
-            self._cwds[tdname] = path
+            self._cwd = path
             yield
         finally:
-            self._cwds.pop(tdname)
-            self._cdlocks[tdname].release()
-
+            self._cwd = ''

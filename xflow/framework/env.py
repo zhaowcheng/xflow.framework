@@ -4,11 +4,10 @@
 环境信息管理。
 """
 
-from typing import Sequence
-
 from ruamel import yaml
 
 from xflow.framework.node import Node
+from xflow.framework.errors import NoSuchNodeError
 
 
 class Env(object):
@@ -19,25 +18,26 @@ class Env(object):
         """
         :param envfile: 环境信息文件。
         """
-        self.__nodes: list[Node] = []
         with open(envfile, encoding='utf8') as f:
-            data = yaml.YAML(typ='safe').load(f)
-            for node in data['nodes']:
-                self.__nodes.append(Node(**node))
+            self.__data = yaml.YAML(typ='safe').load(f)
+        self.__nodes: list[Node] = []
+        for node in self.__data['nodes']:
+            self.__nodes.append(Node(**node))
 
-    def get_nodes(
-        self,
-        names: Sequence[str],
-        labels: Sequence[str]
-    ) -> tuple[Node]:
+    @property
+    def workdir(self) -> str:
+        """
+        本地工作目录。
+        """
+        return self.__data['workdir']
+
+    def get_node(self, name: str) -> Node:
         """
         获取节点。
 
-        :param names: 节点名称列表。
-        :param labels: 节点标签列表。
+        :param name: 节点名。
         """
-        nodes = []
         for node in self.__nodes:
-            if node.name in names or set(node.labels).intersection(labels):
-                nodes.append(node)
-        return tuple(nodes)
+            if node.name == name:
+                return node
+        raise NoSuchNodeError(f'name: {name}')

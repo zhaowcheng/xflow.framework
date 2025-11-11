@@ -10,15 +10,9 @@ import time
 
 from typing import Generator, Callable
 from contextlib import contextmanager
-from threading import Lock
 
 from decorator import decorator
 from paramiko import Transport, SFTPClient, SFTPFile
-
-from xflow.framework.logger import getlogger
-
-
-logger = getlogger(__name__)
 
 
 @decorator
@@ -27,7 +21,7 @@ def open(func, *args, **kwargs):
     自动连接器。
     """
     conn: SFTPConnection = args[0]
-    conn.openfile()
+    conn.open()
     return func(conn, *args, **kwargs)
 
 
@@ -52,8 +46,8 @@ class SFTPConnection(object):
         self._user = user
         self._password = password
         self._port = port
+        self._connstr = f'sftp://{user}@{ip}:{port}'
         self._sftpclient = None
-        self._openlock = Lock()
 
     def _progress_bar_generator(
         self,
@@ -95,7 +89,7 @@ class SFTPConnection(object):
             now = int(time.time())
             if (now - anchor['start']) % interval == 0 \
                     and now != anchor['last'] or percent == 100:
-                logger.info(f'{premsg} {transsize}/{totalsize} {percent}')
+                print(f'[{self._connstr}] {transsize}/{totalsize} {percent}')
                 anchor['last'] = now
         return progress_bar
 
@@ -103,16 +97,12 @@ class SFTPConnection(object):
         """
         开启连接。
         """
-        self._openlock.acquire()
-        try:
-            if self._sftpclient and self._sftpclient.sock.active:
-                return
-            logger.info('Connecting...')
-            t = Transport((self._ip, self._port))
-            t.connect(username=self._user, password=self._password)
-            self._sftpclient = SFTPClient.from_transport(t)
-        finally:
-            self._openlock.release()
+        if self._sftpclient and self._sftpclient.sock.active:
+            return
+        print(f'[{self._connstr}] Connecting...')
+        t = Transport((self._ip, self._port))
+        t.connect(username=self._user, password=self._password)
+        self._sftpclient = SFTPClient.from_transport(t)
 
     def close(self) -> None:
         """
@@ -268,7 +258,7 @@ class SFTPConnection(object):
         """
         创建远端目录。
         """
-        logger.info('Makedirs %s' % path)
+        print(f'[{self._connstr}] Makedirs {path}')
         curpath = '/'
         for p in path.split('/'):
             curpath = self.join(curpath, p)
@@ -291,7 +281,7 @@ class SFTPConnection(object):
         >>> with openfile('/my/file') as f:     # doctest: +SKIP
         ...     content = f.read()              # doctest: +SKIP
         """
-        logger.info('Open %s with mode=%s' % (filepath, mode))
+        print(f'[{self._connstr}] Open {filepath} with mode={mode}')
         f = self._sftpclient.open(filepath, mode)
         try:
             yield f

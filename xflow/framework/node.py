@@ -4,11 +4,16 @@
 节点。
 """
 
-from typing import Sequence, Generator
+from typing import TYPE_CHECKING, Generator
+import inspect
 
 from xflow.framework.ssh import SSHConnection
 from xflow.framework.sftp import SFTPConnection, SFTPFile
 from xflow.framework.utils import copy_signature
+
+if TYPE_CHECKING:
+    from xflow.framework.pipeline import Pipeline
+
 
 class Node(object):
     """
@@ -21,8 +26,7 @@ class Node(object):
         sshport: int,
         user: str,
         password: str,
-        workdir: str,
-        labels: Sequence[str] = [],
+        bwd: str,
         envs: dict[str, str] = {}
     ):
         """
@@ -31,16 +35,13 @@ class Node(object):
         :param sshport: SSH 端口。
         :param user: 用户名。
         :param password: 用户密码。
-        :param workdir: 工作目录。
-        :param labels: 标签。
+        :param bwd: 基础工作目录。
         :param envs: 环境变量。
         """
         self.__name = name
-        self.__labels = list(labels)
-        self.__workdir = workdir
-        self.__ssh = SSHConnection(ip, user, password, port=sshport, envs=envs, 
-                                   initcmd=f'grep -q "cd {self.__workdir}" ~/.profile || ' +
-                                           f'echo "cd {self.__workdir}" >> ~/.profile')
+        self.__bwd = bwd
+        self.__cwd: str = ''
+        self.__ssh = SSHConnection(ip, user, password, port=sshport, envs=envs)
         self.__sftp = SFTPConnection(ip, user, password, port=sshport)
 
     @property
@@ -51,15 +52,38 @@ class Node(object):
         return self.__name
     
     @property
-    def labels(self) -> tuple[str]:
+    def bwd(self) -> str:
         """
-        节点标签。
+        基础工作目录。
         """
-        return tuple(self.__labels)
-
+        return self.__bwd
+    
+    @property
+    def cwd(self) -> str:
+        """
+        当前工作目录（与 pipeline 相关）。
+        """
+        # 如果已指定绝对路径，则直接返回，否则自动拼接。
+        if self.__cwd.startswith('/'):
+            return self.__cwd
+        p = self.pipeline
+        return f'{self.bwd.rstrip("/")}/{p.name}/{p.taskid}/{self.__cwd}'
+    
+    @property
+    def pipeline(self) -> 'Pipeline':
+        """
+        当前 pipeline。
+        """
+        for frame_info in inspect.stack():
+            frame = frame_info.frame
+            for obj in frame.f_locals.values():
+                if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Pipeline':
+                    return obj
+    
     @copy_signature(SSHConnection.exec)
     def exec(self, *args, **kwargs):
-        return self.__ssh.exec(*args, **kwargs)
+        with self.__ssh.cd(self.cwd):
+            return self.__ssh.exec(*args, **kwargs)
 
     def cd(self, path) -> Generator[None, str, None]:
         """
@@ -71,7 +95,11 @@ class Node(object):
         >>> d                           # doctest: +SKIP
         '/my/workdir'                   # doctest: +SKIP
         """
-        return self.__ssh.cd(path)
+        try:
+            self.__cwd = path
+            yield
+        finally:
+            self.__cwd = ''
 
     @copy_signature(SFTPConnection.getfile)
     def getfile(self, *args, **kwargs):
