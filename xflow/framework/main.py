@@ -9,7 +9,7 @@ import sys
 import shutil
 import argparse
 
-from typing import Type
+from typing import Type, Tuple, List
 from importlib import import_module
 from pathlib import Path
 
@@ -23,7 +23,7 @@ def create_parser() -> argparse.ArgumentParser:
     """
     命令行参数解析器。
     """
-    parser = argparse.ArgumentParser(prog='')
+    parser = argparse.ArgumentParser(prog='xflow')
     parser.add_argument('command', choices=['init', 'run'])
     parser.add_argument('-d', '--directory', required=('init' in sys.argv), 
                         help='directory to init (required by `init` command)')
@@ -33,38 +33,38 @@ def create_parser() -> argparse.ArgumentParser:
                         help='environment file (required by `run` command)')
     parser.add_argument('-n', '--nodename', required=('run' in sys.argv), 
                         help='name of the node to run pipeline (required by `run` command)')
-    parser.add_argument('extra_args', nargs=argparse.REMAINDER, 
-                        help='additional arguments passed to pipeline')
+    parser.add_argument('pplargs', nargs=argparse.ZERO_OR_MORE,
+                        help='pipeline arguments')
     parser.add_argument('-v', '--version', action='version', version=f'xflow {__version__}')
     return parser
 
 
-def parse_extra_args(extra_args: list) -> tuple[list, dict]:
+def parse_pplargs(pplargs: List) -> Tuple[list, dict]:
     """
     解析额外的命令行参数为 args 和 kwargs。
     
-    :param extra_args: 额外的参数列表。
+    :param pplargs: 额外的参数列表。
     :return: (args, kwargs) 元组。
     """
     args = []
     kwargs = {}
     
     i = 0
-    while i < len(extra_args):
-        arg = extra_args[i]
+    while i < len(pplargs):
+        arg = pplargs[i]
         if arg.startswith('--'):
-            if i + 1 < len(extra_args) and not extra_args[i + 1].startswith('--'):
+            if i + 1 < len(pplargs) and not pplargs[i + 1].startswith('--'):
                 key = arg[2:].replace('-', '_')
-                kwargs[key] = extra_args[i + 1]
+                kwargs[key] = pplargs[i + 1]
                 i += 2
             else:
                 key = arg[2:].replace('-', '_')
                 kwargs[key] = True
                 i += 1
         elif arg.startswith('-'):
-            if i + 1 < len(extra_args) and not extra_args[i + 1].startswith('-'):
+            if i + 1 < len(pplargs) and not pplargs[i + 1].startswith('-'):
                 key = arg[1:].replace('-', '_')
-                kwargs[key] = extra_args[i + 1]
+                kwargs[key] = pplargs[i + 1]
                 i += 2
             else:
                 key = arg[1:].replace('-', '_')
@@ -106,8 +106,9 @@ def run(
     """
     env = Env(envfile)
     sys.path.insert(0, os.getcwd())
-    pplname = Path(envfile).name
-    pplmod = import_module(pplfile)
+    pplname = Path(pplfile).name.replace('.py', '')
+    modname = pplfile.replace('.py', '').replace(os.sep, '.')
+    pplmod = import_module(modname)
     pplcls: Type[Pipeline] = getattr(pplmod, pplname)
     pplinst: Pipeline = pplcls(env.workdir, env.get_node(nodename), *args, **kwargs)
     result: Result = pplinst.run()
@@ -123,8 +124,8 @@ def main() -> None:
     if args.command == 'init':
         init(args.directory)
     elif args.command == 'run':
-        extra_args, extra_kwargs = parse_extra_args(args.extra_args)
-        run(args.pplfile, args.envfile, args.nodename, *extra_args, **extra_kwargs)
+        pplargs, pplkwargs = parse_pplargs(args.pplargs)
+        run(args.pplfile, args.envfile, args.nodename, *pplargs, **pplkwargs)
 
 
 if __name__ == '__main__':

@@ -7,12 +7,16 @@
 import re
 import traceback
 
-from typing import Literal
+from typing import List, TYPE_CHECKING
 from pathlib import Path
 
+from typing_extensions import Literal
 from filelock import FileLock
 
-from xflow.framework.node import Node
+from xflow.framework.errors import CommandError
+
+if TYPE_CHECKING:
+    from xflow.framework.node import Node
 
 
 Result = Literal['FAILED', 'SUCCESSFUL']
@@ -25,7 +29,7 @@ class Pipeline(object):
     def __init__(
         self, 
         bwd: str, 
-        node: Node, 
+        node: 'Node', 
         *args, 
         **kwargs
     ):
@@ -52,7 +56,7 @@ class Pipeline(object):
         """
         当前工作目录。
         """
-        return self.bwd.joinpath(self.name, self.taskid)
+        return self.bwd.joinpath(self.name, f'{self.taskid}')
     
     def setup(self) -> None:
         """
@@ -61,18 +65,22 @@ class Pipeline(object):
         # 获取 taskid
         print(f'Getting taskid: ', end='')
         parent = self.bwd.joinpath(self.name)
-        parent.mkdir(parents=True)
+        parent.mkdir(parents=True, exist_ok=True)
         idfile = parent.joinpath('taskid.txt')
-        with FileLock(idfile):
+        idfile.touch()
+        with FileLock(f'{idfile}.lock'):
             with open(idfile, 'r+') as f:
                 newid = int(f.read() or 0) + 1
-                f.truncate()
-                f.write(newid)
+            with open(idfile, 'w') as f:
+                f.write(f'{newid}')
         self.taskid = newid
         print(self.taskid)
 
         # 创建远端工作目录
-        self.node.exec(f'mkdir -p {self.node.cwd}')
+        self.node.mkcwd()
+
+        # 创建本地工作目录
+        self.cwd.mkdir(parents=True, exist_ok=True) 
     
     def stage1(self) -> None:
         """
@@ -82,7 +90,7 @@ class Pipeline(object):
         raise NotImplementedError
 
     @property
-    def stages(self) -> list[str]:
+    def stages(self) -> List[str]:
         """
         所有阶段名称。
         """
@@ -92,7 +100,7 @@ class Pipeline(object):
         """
         执行 pipeline。
         """
-        title = lambda t: print('='.center(80, t))
+        title = lambda t: print(t.center(80, '='))
         try:
             title('setup')
             self.setup()
@@ -105,10 +113,15 @@ class Pipeline(object):
             traceback.print_exc()
         finally:
             title('teardown')
+            self.teardown()
         return self.result
             
     def teardown(self) -> None:
         """
         后置步骤，不管成功与否，都会执行该步骤。
         """
-        pass
+        if self.result == 'SUCCESSFUL':
+            if self.node.is_container and not self.node.existed:
+                self.node.remove(force=True)
+            else:
+                self.node.rmcwd()

@@ -7,8 +7,9 @@
 from pathlib import Path
 
 
-XFLOW_DIR = Path(f'{__file__}/..').absolute()
+XFLOW_DIR: Path = Path(__file__).parent
 
 STATICS_DIR = XFLOW_DIR.joinpath('statics')
 
 INIT_DIR = STATICS_DIR.joinpath('initdir')
+

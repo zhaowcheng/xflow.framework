@@ -12,9 +12,9 @@ class SSHConnectError(Exception):
     pass
 
 
-class SSHCommandError(Exception):
+class CommandError(Exception):
     """
-    SSH 命令错误。
+    命令执行错误。
     """
     pass
 
@@ -22,5 +22,12 @@ class SSHCommandError(Exception):
 class NoSuchNodeError(Exception):
     """
     无此节点。
+    """
+    pass
+
+
+class NoSuchDockerError(Exception):
+    """
+    无此 Docker。
     """
     pass

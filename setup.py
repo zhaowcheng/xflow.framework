@@ -24,11 +24,8 @@ def find_requires():
 
 def find_long_description():
     desc = ''
-    for readme in ('README.md'):
-        if desc:
-            desc += '\n***\n\n'
-        with open(readme, encoding='utf8') as f:
-            desc += ''.join(f.readlines()[6:])
+    with open('README.md', encoding='utf8') as f:
+        desc += ''.join(f.readlines()[6:])
     desc = desc.replace('/blob/master/',
                         f'/blob/v{find_version()}/')
     return desc
