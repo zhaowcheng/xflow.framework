@@ -30,17 +30,16 @@ class Pipeline(object):
         self, 
         bwd: str, 
         node: 'Node', 
-        *args, 
-        **kwargs
+        **pplargs
     ):
         """
         :param bwd: 基础工作目录。
         :param node: 执行节点名称。
+        :param kwargs: 流水线参数。
         """
         self.bwd = Path(bwd)
         self.node = node
-        self.args = args
-        self.kwargs = kwargs
+        self.pplargs = pplargs
         self.result: Result = None
         self.taskid: int = None
 
@@ -75,6 +74,9 @@ class Pipeline(object):
                 f.write(f'{newid}')
         self.taskid = newid
         print(self.taskid)
+
+        # 打印参数
+        print(f'pplargs: {self.pplargs}')
 
         # 创建远端工作目录
         self.node.mkcwd()

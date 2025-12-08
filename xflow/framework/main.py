@@ -9,7 +9,7 @@ import sys
 import shutil
 import argparse
 
-from typing import Type, Tuple, List
+from typing import Type, Dict, Optional
 from importlib import import_module
 from pathlib import Path
 
@@ -33,48 +33,10 @@ def create_parser() -> argparse.ArgumentParser:
                         help='environment file (required by `run` command)')
     parser.add_argument('-n', '--nodename', required=('run' in sys.argv), 
                         help='name of the node to run pipeline (required by `run` command)')
-    parser.add_argument('pplargs', nargs=argparse.ZERO_OR_MORE,
-                        help='pipeline arguments')
+    parser.add_argument('-a', '--pplargs',
+                        help='pipeline arguments (optional for `run` command)')
     parser.add_argument('-v', '--version', action='version', version=f'xflow {__version__}')
     return parser
-
-
-def parse_pplargs(pplargs: List) -> Tuple[list, dict]:
-    """
-    解析额外的命令行参数为 args 和 kwargs。
-    
-    :param pplargs: 额外的参数列表。
-    :return: (args, kwargs) 元组。
-    """
-    args = []
-    kwargs = {}
-    
-    i = 0
-    while i < len(pplargs):
-        arg = pplargs[i]
-        if arg.startswith('--'):
-            if i + 1 < len(pplargs) and not pplargs[i + 1].startswith('--'):
-                key = arg[2:].replace('-', '_')
-                kwargs[key] = pplargs[i + 1]
-                i += 2
-            else:
-                key = arg[2:].replace('-', '_')
-                kwargs[key] = True
-                i += 1
-        elif arg.startswith('-'):
-            if i + 1 < len(pplargs) and not pplargs[i + 1].startswith('-'):
-                key = arg[1:].replace('-', '_')
-                kwargs[key] = pplargs[i + 1]
-                i += 2
-            else:
-                key = arg[1:].replace('-', '_')
-                kwargs[key] = True
-                i += 1
-        else:
-            args.append(arg)
-            i += 1
-    
-    return args, kwargs
 
 
 def init(directory: str) -> None:
@@ -88,14 +50,24 @@ def init(directory: str) -> None:
         exit(1)
     shutil.copytree(INIT_DIR, directory)
     print(f'Initialized {directory}')
+
+def parse_pplargs(pplargs: Optional[str]) -> Dict[str, str]:
+    """
+    解析流水线参数。
+    """
+    pplargs = pplargs or ''
+    kwargs = {}
+    for arg in pplargs.split():
+        name, value = arg.split('=')
+        kwargs[name] = value
+    return kwargs
     
 
 def run(
         pplfile: str,
         envfile: str,
         nodename: str,
-        *args,
-        **kwargs
+        **pplargs
     ) -> None:
     """
     执行 pipeline。
@@ -103,6 +75,7 @@ def run(
     :param pplfile: pipeline 文件路径。
     :param envfile: 环境信息文件路径。
     :param nodename: 节点名称。
+    :param pplargs: 流水线参数。
     """
     env = Env(envfile)
     sys.path.insert(0, os.getcwd())
@@ -110,7 +83,7 @@ def run(
     modname = pplfile.replace('.py', '').replace(os.sep, '.')
     pplmod = import_module(modname)
     pplcls: Type[Pipeline] = getattr(pplmod, pplname)
-    pplinst: Pipeline = pplcls(env.workdir, env.get_node(nodename), *args, **kwargs)
+    pplinst: Pipeline = pplcls(env.workdir, env.get_node(nodename), **pplargs)
     result: Result = pplinst.run()
     if result == 'FAILED':
         exit(1)
@@ -124,8 +97,7 @@ def main() -> None:
     if args.command == 'init':
         init(args.directory)
     elif args.command == 'run':
-        pplargs, pplkwargs = parse_pplargs(args.pplargs)
-        run(args.pplfile, args.envfile, args.nodename, *pplargs, **pplkwargs)
+        run(args.pplfile, args.envfile, args.nodename, **parse_pplargs(args.pplargs))
 
 
 if __name__ == '__main__':
