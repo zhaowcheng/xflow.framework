@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 from xflow.framework.ssh import SSHConnection
 from xflow.framework.container import ContainerConnection
-from xflow.framework.utils import CommandResult
+from xflow.framework.ssh import CommandResult
 from xflow.framework.pipeline import Pipeline
 
 

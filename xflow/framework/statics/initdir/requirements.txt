@@ -1,1 +1,1 @@
-xflow.framework; python_version >= '3.6'
+xflow.framework; python_version >= '3.10'

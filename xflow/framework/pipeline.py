@@ -7,40 +7,98 @@
 import re
 import traceback
 
-from typing import List, TYPE_CHECKING
+import click
+
+from typing import List, Literal, Any, Optional, Iterable, Annotated, TYPE_CHECKING
 from pathlib import Path
 
-from typing_extensions import Literal
 from filelock import FileLock
-
-from xflow.framework.errors import CommandError
+from pydantic import BaseModel, Field, create_model
+from pydantic.fields import FieldInfo
 
 if TYPE_CHECKING:
     from xflow.framework.node import Node
 
-
-Result = Literal['FAILED', 'SUCCESSFUL']
+TResult = Literal['FAILED', 'SUCCESSFUL']
 
 
 class Pipeline(object):
     """
     流水线。
     """ 
+    class Option(FieldInfo):
+        """
+        流水线参数。
+        """
+        def __init__(
+            self,
+            desc: Optional[str] = None,
+            default: Any = None,
+            choices: Optional[Iterable] = None
+        ):
+            """
+            :param desc: 描述。
+            :param default: 默认值（注意：bool 类型的默认值设置无效，固定为 False）。
+            :param choices: 枚举值列表。
+            """
+            clickopts = {
+                'help': desc,
+                'default': default
+            }
+            if default is not None:
+                clickopts['required'] = False
+            if choices:
+                clickopts['type'] = click.Choice(choices)
+            super().__init__(
+                json_schema_extra={
+                    'typed-settings': {
+                        'click': clickopts
+                    }
+                }
+            )
+           
+
+    class Options(BaseModel):
+        """
+        流水线参数表。
+        """
+        @classmethod
+        def normalize(cls) -> type['Pipeline.Options']:
+            """
+            规范化参数后返回一个新的 Options。
+            """
+            newfields = {}
+            for fname, finfo in cls.model_fields.items():
+                fdict = finfo.asdict()
+                clickopts = fdict['attributes']['json_schema_extra']['typed-settings']['click']
+                # bool 类型都作为 flag 参数。
+                if fdict['annotation'] is bool:
+                    clickopts['param_decls'] = (f'--{fname.replace("_", "-")}',)
+                    clickopts['default'] = False
+                newfields[fname] = Annotated[
+                    (
+                        fdict['annotation'], 
+                        *fdict['metadata'], 
+                        Field(**fdict['attributes'])
+                    )
+                ]
+            return create_model(cls.__name__, __base__=cls, **newfields)
+
     def __init__(
         self, 
         bwd: str, 
         node: 'Node', 
-        **pplargs
+        options: Options
     ):
         """
         :param bwd: 基础工作目录。
         :param node: 执行节点名称。
-        :param kwargs: 流水线参数。
+        :param options: 流水线参数。
         """
         self.bwd = Path(bwd)
         self.node = node
-        self.pplargs = pplargs
-        self.result: Result = None
+        self.options = options
+        self.result: TResult = None
         self.taskid: int = None
 
     @property
@@ -76,7 +134,7 @@ class Pipeline(object):
         print(self.taskid)
 
         # 打印参数
-        print(f'pplargs: {self.pplargs}')
+        print(f'options: {self.options}')
 
         # 创建远端工作目录
         self.node.mkcwd()
@@ -98,7 +156,7 @@ class Pipeline(object):
         """
         return sorted([n for n in dir(self.__class__) if re.match(r'stage\d+', n)])
 
-    def run(self) -> Result:
+    def run(self) -> TResult:
         """
         执行 pipeline。
         """
@@ -127,3 +185,4 @@ class Pipeline(object):
                 self.node.remove(force=True)
             else:
                 self.node.rmcwd()
+

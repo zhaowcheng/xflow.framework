@@ -12,4 +12,3 @@ XFLOW_DIR: Path = Path(__file__).parent
 STATICS_DIR = XFLOW_DIR.joinpath('statics')
 
 INIT_DIR = STATICS_DIR.joinpath('initdir')
-

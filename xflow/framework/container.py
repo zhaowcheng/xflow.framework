@@ -20,7 +20,7 @@ from docker.models.containers import Container
 from docker.tls import TLSConfig
 
 from xflow.framework.errors import CommandError
-from xflow.framework.utils import CommandResult
+from xflow.framework.ssh import CommandResult
 
 
 @decorator

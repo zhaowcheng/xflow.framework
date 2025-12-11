@@ -5,10 +5,21 @@ class example(Pipeline):
     """
     pipeline 示例。
     """
+    class Options(Pipeline.Options):
+        """
+        流水线参数，根据需要自行定义。
+        """
+        pyver: int = Pipeline.Option(desc='Python version.',
+                                     default=3)
+        packtype: str = Pipeline.Option(desc='Package type.',
+                                        default='onedir',
+                                        choices=('onefile', 'onedir'))
+    
     def setup(self) -> None:
         """
         前置步骤。
         """
+        self.options: __class__.Options  # 用于类型推断
         super().setup()
 
     def stage1(self) -> None:
@@ -22,10 +33,10 @@ class example(Pipeline):
         编译代码。
         """
         with self.node.cd('xbot.framework'):
-            self.node.exec('python3 -m venv venv')
+            self.node.exec(f'python{self.options.pyver} -m venv venv')
             self.node.exec('venv/bin/pip install -r requirements.txt')
             self.node.exec('venv/bin/pip install pyinstaller')
-            self.node.exec('venv/bin/python -m PyInstaller --onedir -n xbot xbot/framework/main.py')
+            self.node.exec(f'venv/bin/python -m PyInstaller --{self.options.packtype} -n xbot xbot/framework/main.py')
 
     def stage3(self) -> None:
         """
@@ -33,7 +44,7 @@ class example(Pipeline):
         """
         self.node.putfile(
             './requirements.txt',
-            self.node.cwd.joinpath('xbot.framework', 'dist', 'xbot')
+            self.node.cwd.joinpath('xbot.framework', 'dist')
         )
         with self.node.cd('xbot.framework/dist'):
             self.node.exec('tar czvf xbot.tar.gz xbot/')
