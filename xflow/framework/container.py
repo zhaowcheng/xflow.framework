@@ -13,6 +13,7 @@ from select import select
 from socket import SocketIO
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
+from functools import cached_property
 
 from decorator import decorator
 from docker.client import DockerClient
@@ -108,6 +109,13 @@ class ContainerConnection(object):
             else:
                 # 容器未创建
                 return f'{prefix}:{self._image}->...'
+            
+    @cached_property
+    def _uid(self) -> int:
+        """
+        用户 id。
+        """
+        return int(self.exec('id -u'))
 
     def open(self) -> None:
         """
@@ -178,14 +186,14 @@ class ContainerConnection(object):
         print(f'[{self._connstr}:{self._cwd or "~"}] {cmd}')
         cmdid = self._dockerclient.api.exec_create(
             self._container.id,
-            cmd,
+            # 使用 bash -c 的方式是为了避免 docker exec api 报 "cd not found" 的问题
+            'bash -c "' + (f'cd {self._cwd} && {cmd}' if self._cwd else cmd) + '"',
             stdout=True,
             stderr=True,
             stdin=True,
             tty=True,
             environment=environment,
-            user=self._user,
-            workdir=self._cwd or None
+            user=self._user
         )['Id']
         sock: SocketIO = self._dockerclient.api.exec_start(cmdid, tty=True, socket=True)
         encoding = environment['LANG'].split('.')[-1]
@@ -204,15 +212,15 @@ class ContainerConnection(object):
         return CommandResult(output, rc=rc, cmd=cmd)
 
     @contextmanager
-    def cd(self, path: Union[str, PurePosixPath]) -> Generator[None, str, None]:
+    def dir(self, path: str | PurePosixPath) -> Generator[None, None, None]:
         """
         切换工作目录。
 
-        >>> with cd('/my/workdir'):     # doctest: +SKIP
-        ...     d = exec('pwd')         # doctest: +SKIP
-        ...                             # doctest: +SKIP
-        >>> d                           # doctest: +SKIP
-        '/my/workdir'                   # doctest: +SKIP
+        >>> with dir('/my/workdir'):     # doctest: +SKIP
+        ...     d = exec('pwd')          # doctest: +SKIP
+        ...                              # doctest: +SKIP
+        >>> d                            # doctest: +SKIP
+        '/my/workdir'                    # doctest: +SKIP
         """
         try:
             self._cwd = str(path)
@@ -269,6 +277,16 @@ class ContainerConnection(object):
         print(f'[{self._connstr}] Put {lfile} => {rfile}')
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode='w') as tar:
-            tar.add(lfile)
+            tarinfo = tar.gettarinfo(str(lfile), arcname=lfile.name)
+            tarinfo.uid = self._uid
+            with open(lfile, 'rb') as f:
+                tar.addfile(tarinfo, f)
         stream.seek(0)
         self._container.put_archive(str(rdir), stream)
+
+    @autopen()
+    def exists(self, path: Union[str, PurePosixPath]) -> bool:
+        """
+        检查远端路径是否存在。
+        """
+        return self.exec(f'test -e {path} && echo true || echo flase') == 'true'

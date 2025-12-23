@@ -9,10 +9,12 @@ import sys
 import shutil
 
 import click
-import typed_settings
 
 from typing import Type
 from importlib import import_module
+from pathlib import Path
+
+from typed_settings import click_options
 
 from xflow.framework.version import __version__
 from xflow.framework.common import INIT_DIR
@@ -24,61 +26,44 @@ class RunGroup(click.Group):
     """
     run 命令组。
     """
-    def import_pipeline(self, pplname: str) -> Type[Pipeline]:
+    def import_pipeline(self, projdir: str, pplname: str) -> Type[Pipeline]:
         """
         导入 Pipeline。
 
+        :param projdir:  项目目录。
         :param pplname: pipeline 名称。
         """
         if '.' not in sys.path:
             sys.path.insert(0, '.')
-        ppldir = self.find_pipelines_dir()
-        pplfile = os.path.join(ppldir, f'{pplname}.py')
-        modname = pplfile.replace('.py', '').replace(os.sep, '.').strip('.')
-        pplmod = import_module(modname)
+        os.chdir(projdir)
+        pplmod = import_module(f'pipelines.{pplname}')
         pplcls: Type[Pipeline] = getattr(pplmod, pplname)
         return pplcls
-
-    def find_pipelines_dir(self):
-        """
-        查找 pipelines 目录。
-        """
-        envar = 'XFLOW_PIPELINES_DIR'
-        # 如果存在环境变量，则使用环境变量指定的目录。
-        if os.environ.get(envar):
-            return os.environ[envar]
-        # 环境变量未指定，则递归查找当前目录下名为 `pipelines` 的子目录。
-        for top, dirs, files in os.walk('.'):
-            for d in dirs:
-                if d == 'pipelines':
-                    return os.path.join(top, d)
-        # 未找到，报错退出。
-        print(f'Error: The `pipelines` directory was not found, '
-            f'please specify via {envar}.')
-        exit(1)
-
-    def list_commands(self, ctx):
+    
+    def list_commands(self, ctx: click.Context):
         """
         把 pipelines 目录下的 `.py` 文件名作为子命令（不递归）。
         """
         cmds = []
-        for f in os.listdir(self.find_pipelines_dir()):
+        ppldir = os.path.join(ctx.obj['projdir'], 'pipelines')
+        for f in os.listdir(ppldir):
             if f.endswith('.py') and f not in ('__init__.py', 'template.py'):
                 cmds.append(f.replace('.py', ''))
         return cmds
                 
-    def get_command(self, ctx, cmd_name):
+    def get_command(self, ctx: click.Context, cmd_name: str):
         """
         返回执行 pipeline 的函数。
         """
-        pplcls = self.import_pipeline(cmd_name)
+        pplcls = self.import_pipeline(ctx.obj['projdir'], cmd_name)
         @click.command(cmd_name)
-        @typed_settings.click_options(pplcls.Options.normalize(), 'xflow')
+        @click_options(pplcls.Options, 'xflow')
         @click.pass_context
         def command(ctx: click.Context, options: Pipeline.Options):
-            env = Env(ctx.obj['envfile'])
-            pplinst = pplcls(env.workdir, 
-                             env.get_node(ctx.obj['nodename']), 
+            env = Env(Path(ctx.obj['projdir']).joinpath('env.yml'))
+            pplinst = pplcls(ctx.obj['projdir'], 
+                             env,
+                             ctx.obj['nodename'], 
                              options)
             result: TResult = pplinst.run()
             if result == 'FAILED':
@@ -88,36 +73,37 @@ class RunGroup(click.Group):
 
 @click.group()
 @click.version_option(__version__)
-def main():
+@click.option('--projdir', '-p', required=True, envvar='XFLOW_PROJDIR', show_envvar=True)
+@click.pass_context
+def main(ctx: click.Context, projdir: str):
     """
     xflow
     """
-    pass
+    ctx.ensure_object(dict)
+    ctx.obj['projdir'] = projdir
 
 
 @main.command()
-@click.argument('directory')
-def init(directory: str):
+@click.pass_context
+def init(ctx: click.Context):
     """
-    Initialize a project directory.
+    Initialize the project directory.
     """
-    if os.path.exists(directory):
-        print(f'Error: {directory} already exists')
+    projdir = ctx.obj['projdir']
+    if os.path.exists(projdir) and os.listdir(projdir):
+        print(f'Error: {projdir} exists and is not empty.')
         exit(1)
-    shutil.copytree(INIT_DIR, directory)
-    print(f'Initialized {directory}')
+    shutil.copytree(INIT_DIR, projdir, dirs_exist_ok=True)
+    print(f'Initialized {projdir}')
     
 
 @main.group(cls=RunGroup)
-@click.option('--envfile', '-e', required=True)
 @click.option('--nodename', '-n', required=True)
 @click.pass_context
-def run(ctx: click.Context, envfile: str, nodename: str):
+def run(ctx: click.Context, nodename: str):
     """
     Run a pipeline.
     """
-    ctx.ensure_object(dict)
-    ctx.obj['envfile'] = envfile
     ctx.obj['nodename'] = nodename
 
 

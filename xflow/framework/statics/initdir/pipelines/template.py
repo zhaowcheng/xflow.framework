@@ -7,7 +7,7 @@ class template(Pipeline):
     """
     class Options(Pipeline.Options):
         """
-        流水线参数，根据需要自行定义。
+        流水线参数表，根据需要自行定义。
         """
         pass
 

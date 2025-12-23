@@ -32,7 +32,7 @@ class example(Pipeline):
         """
         编译代码。
         """
-        with self.node.cd('xbot.framework'):
+        with self.node.dir('xbot.framework'):
             self.node.exec(f'python{self.options.pyver} -m venv venv')
             self.node.exec('venv/bin/pip install -r requirements.txt')
             self.node.exec('venv/bin/pip install pyinstaller')
@@ -46,7 +46,7 @@ class example(Pipeline):
             './requirements.txt',
             self.node.cwd.joinpath('xbot.framework', 'dist')
         )
-        with self.node.cd('xbot.framework/dist'):
+        with self.node.dir('xbot.framework/dist'):
             self.node.exec('tar czvf xbot.tar.gz xbot/')
         self.node.getfile(
             self.node.cwd.joinpath('xbot.framework', 'dist', 'xbot.tar.gz'),

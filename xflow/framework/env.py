@@ -5,6 +5,7 @@
 """
 
 from typing import List
+from pathlib import Path
 
 from ruamel import yaml
 
@@ -16,7 +17,7 @@ class Env(object):
     """
     环境信息管理类。
     """
-    def __init__(self, envfile: str):
+    def __init__(self, envfile: str | Path):
         """
         :param envfile: 环境信息文件。
         """
@@ -58,13 +59,6 @@ class Env(object):
                         envs=nodeinfo['envs']
                     )
                 )
-
-    @property
-    def workdir(self) -> str:
-        """
-        本地工作目录。
-        """
-        return self.__data['workdir']
 
     def get_node(self, name: str) -> Node:
         """

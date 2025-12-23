@@ -300,15 +300,15 @@ class SSHConnection(object):
         return CommandResult(output, rc=rc, cmd=cmd)
 
     @contextmanager
-    def cd(self, path: Union[str, PurePosixPath]) -> Generator[None, str, None]:
+    def dir(self, path: str | PurePosixPath) -> Generator[None, None, None]:
         """
         切换工作目录。
 
-        >>> with cd('/my/workdir'):     # doctest: +SKIP
-        ...     d = exec('pwd')         # doctest: +SKIP
-        ...                             # doctest: +SKIP
-        >>> d                           # doctest: +SKIP
-        '/my/workdir'                   # doctest: +SKIP
+        >>> with dir('/my/workdir'):     # doctest: +SKIP
+        ...     d = exec('pwd')          # doctest: +SKIP
+        ...                              # doctest: +SKIP
+        >>> d                            # doctest: +SKIP
+        '/my/workdir'                    # doctest: +SKIP
         """
         try:
             self._cwd = str(path)

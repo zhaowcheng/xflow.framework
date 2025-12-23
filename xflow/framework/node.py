@@ -3,10 +3,14 @@
 """
 节点。
 """
+import os
+import shutil
 import inspect
+import tempfile
+
 from pathlib import PurePosixPath, Path
 
-from typing import Generator, Dict, Optional, Union
+from typing import Generator, Dict, Optional, Union, Literal
 from contextlib import contextmanager
 
 from xflow.framework.ssh import SSHConnection
@@ -39,6 +43,7 @@ class Node(object):
         self.__bwd: PurePosixPath = PurePosixPath(bwd)
         self.__cwd: PurePosixPath = PurePosixPath('')
         self.__conn = conn
+        self.__nixenv = {}
 
     @property
     def name(self) -> str:
@@ -64,6 +69,13 @@ class Node(object):
             return self.__cwd
         p = self.pipeline
         return self.bwd.joinpath(p.name, f'{p.taskid}', self.__cwd)
+    
+    @property
+    def scriptdir(self) -> PurePosixPath:
+        """
+        脚本存放目录。
+        """
+        return self.cwd.joinpath('scripts')
     
     @property
     def pipeline(self) -> 'Pipeline':
@@ -118,21 +130,50 @@ class Node(object):
         self.__conn.exec(f'rm -rf {self.cwd}')
     
     @contextmanager
-    def cd(self, path: str) -> Generator[None, str, None]:
+    def dir(self, path: str | PurePosixPath) -> Generator[None, None, None]:
         """
         切换工作目录。
 
-        >>> with cd('/my/workdir'):     # doctest: +SKIP
-        ...     d = exec('pwd')         # doctest: +SKIP
-        ...                             # doctest: +SKIP
-        >>> d                           # doctest: +SKIP
-        '/my/workdir'                   # doctest: +SKIP
+        >>> with dir('/my/workdir'):     # doctest: +SKIP
+        ...     d = exec('pwd')          # doctest: +SKIP
+        ...                              # doctest: +SKIP
+        >>> d                            # doctest: +SKIP
+        '/my/workdir'                    # doctest: +SKIP
         """
         try:
             self.__cwd = PurePosixPath(path)
             yield
         finally:
             self.__cwd = PurePosixPath('')
+
+    @contextmanager
+    def nixenv(
+        self, 
+        flake: str | PurePosixPath,
+        system: Optional[Literal['x86_64-linux', 
+                                 'aarch64-linux', 
+                                 'loongarch64-linux', 
+                                 'mips64el-linux']] = None,
+        name: str = 'default'
+    ) -> Generator[None, None, None]:
+        """
+        进入一个 nix shell 环境。
+
+        :param flake: flake（目录）路径。
+        :param system: 系统平台，为空则为当前系统平台。
+        :param name: 环境名称。
+        """
+        try:
+            self.__nixenv.update(
+                {
+                    'flake': flake,
+                    'system': system,
+                    'name': name
+                }
+            )
+            yield
+        finally:
+            self.__nixenv.clear()
             
     def exec(
         self,
@@ -152,8 +193,46 @@ class Node(object):
         >>> exec('ls /home')  # successful                              # doctest: +SKIP
         >>> exec('ls /errpath')  # CommandError                         # doctest: +SKIP
         """
-        with self.__conn.cd(self.cwd):
+        if self.__nixenv:
+            flake = self.__nixenv['flake']
+            system = self.__nixenv['system']
+            name = self.__nixenv['name']
+            if system:
+                attr = f'devShells.{system}.{name}'
+            else:
+                attr = name
+            cmd = f'nix develop {flake}#{attr} --log-format raw -c {cmd}'
+        with self.__conn.dir(self.cwd):
             return self.__conn.exec(cmd, envs=envs)
+        
+    def exec_script(
+        self,
+        script: str | Path,
+        argstr: str = '',
+        envs: Optional[Dict[str, str]] = None
+    ) -> CommandResult:
+        """
+        上传并执行脚本。
+
+        :param script: 本地脚本路径（相对项目目录）。
+        :param argstr: 脚本参数。
+        :param envs: 环境变量。
+        :return: 脚本输出。
+
+        :raises: 
+            `CommandError` -- 返回码不为 0。
+
+        >>> exec_script('scripts/my_script.sh')                         # doctest: +SKIP
+        """
+        lscript = Path(script).absolute()
+        rscript = self.scriptdir.joinpath(lscript.name)
+        rdir = rscript.parent
+        if not self.exists(rscript):
+            if not self.exists(rdir):
+                self.__conn.exec(f'mkdir -p {rdir}')
+            self.putfile(lscript, rdir)
+            self.__conn.exec(f'chmod +x {rscript}')
+        return self.exec(f'{rscript} {argstr}', envs=envs)
         
     def getfile(
         self, 
@@ -186,7 +265,49 @@ class Node(object):
         >>> putfile('D:\\myfile', '/tmp')  # /tmp/myfile
         """
         return self.__conn.putfile(lfile, rdir)
-        
+    
+    def exists(self, path: Union[str, PurePosixPath]) -> bool:
+        """
+        检查远端路径是否存在。
+        """
+        return self.__conn.exists(path)
+    
+    def write(self, text: str, rfile: Union[str, PurePosixPath]) -> None:
+        """
+        写入一个文本文件到远端路径 `path`。
+
+        :param text: 要写入的文本。
+        :param rfile: 远端文件路径。
+        """
+        rfile = PurePosixPath(rfile)
+        filename = rfile.name
+        rdir = rfile.parent
+        tmpdir = Path(tempfile.mkdtemp())
+        lfile = tmpdir.joinpath(filename)
+        with open(lfile, 'w') as f:
+            f.write(text)
+        self.putfile(lfile, rdir)
+        shutil.rmtree(tmpdir)
+    
+    def git(
+        self,
+        repourl: str,
+        revision: str,
+        directory: Optional[str | PurePosixPath] = None
+    ) -> None:
+        """
+        git clone 一个仓库。
+
+        :param repourl: 仓库地址。
+        :param revision: 分支、tag 或 commit。
+        :param directory: 克隆的目标目录。
+        """
+        humanish = repourl.split('/')[-1].replace('.git', '')
+        directory = directory or humanish
+        self.exec(f'git clone {repourl} {directory}')
+        with self.dir(directory):
+            self.exec(f'git checkout {revision}')
+
 
 class NativeNode(Node):
     """

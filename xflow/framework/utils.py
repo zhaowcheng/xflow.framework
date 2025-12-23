@@ -50,3 +50,10 @@ def copy_signature(f: T) -> Callable[[Any], T]:
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def isclass(obj: Any) -> bool:
+    """
+    判断一个对象是否为 class。
+    """
+    return isinstance(obj, type)
