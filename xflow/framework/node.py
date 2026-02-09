@@ -68,7 +68,7 @@ class Node(object):
         if self.__cwd.is_absolute():
             return self.__cwd
         p = self.pipeline
-        return self.bwd.joinpath(p.name, f'{p.buildnum}', self.__cwd)
+        return self.bwd.joinpath(p.name, f'{p.buildid}', self.__cwd)
     
     @property
     def scriptdir(self) -> PurePosixPath:
