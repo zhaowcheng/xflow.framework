@@ -86,7 +86,7 @@ class Pipeline(object):
         self.node = self.env.get_node(nodename)
         self.options = options
         self.result: TResult = None
-        self.taskid: int = None
+        self.buildnum: int = None
 
     @property
     def name(self) -> str:
@@ -100,25 +100,25 @@ class Pipeline(object):
         """
         当前工作目录。
         """
-        return self.bwd.joinpath(self.name, f'{self.taskid}')
+        return self.bwd.joinpath(self.name, f'{self.buildnum}')
     
     def setup(self) -> None:
         """
         前置步骤，如果失败将不会执行任何 stage，直接执行 teardown。
         """
-        # 获取 taskid
-        print(f'Getting taskid: ', end='')
+        # 获取 buildnum
+        print(f'Getting buildnum: ', end='')
         parent = self.bwd.joinpath(self.name)
         parent.mkdir(parents=True, exist_ok=True)
-        idfile = parent.joinpath('taskid.txt')
-        idfile.touch()
-        with FileLock(f'{idfile}.lock'):
-            with open(idfile, 'r+') as f:
-                newid = int(f.read() or 0) + 1
-            with open(idfile, 'w') as f:
-                f.write(f'{newid}')
-        self.taskid = newid
-        print(self.taskid)
+        numfile = parent.joinpath('buildnum.txt')
+        numfile.touch()
+        with FileLock(f'{numfile}.lock'):
+            with open(numfile, 'r+') as f:
+                newnum = int(f.read() or 0) + 1
+            with open(numfile, 'w') as f:
+                f.write(f'{newnum}')
+        self.buildnum = newnum
+        print(self.buildnum)
 
         # 打印参数
         print(f'options: {self.options}')
