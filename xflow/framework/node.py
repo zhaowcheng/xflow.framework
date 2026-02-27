@@ -154,21 +154,24 @@ class Node(object):
                                  'aarch64-linux', 
                                  'loongarch64-linux', 
                                  'mips64el-linux']] = None,
-        name: str = 'default'
+        name: str = 'default',
+        options: Optional[str] = None
     ) -> Generator[None, None, None]:
         """
-        进入一个 nix shell 环境。
+        使用 nix develop 进入一个 nix shell 环境。
 
         :param flake: flake（目录）路径。
         :param system: 系统平台，为空则为当前系统平台。
         :param name: 环境名称。
+        :param options: nix develop 命令选项。
         """
         try:
             self.__nixenv.update(
                 {
                     'flake': flake,
                     'system': system,
-                    'name': name
+                    'name': name,
+                    'options': options
                 }
             )
             yield
@@ -197,11 +200,13 @@ class Node(object):
             flake = self.__nixenv['flake']
             system = self.__nixenv['system']
             name = self.__nixenv['name']
+            options = self.__nixenv['options']
             if system:
                 attr = f'devShells.{system}.{name}'
             else:
                 attr = name
-            cmd = f'nix develop {flake}#{attr} --log-format raw -c {cmd}'
+            options = (options or '') + f' --log-format raw -c {cmd}'
+            cmd = f'nix develop {flake}#{attr} {options.strip()}'
         with self.__conn.dir(self.cwd):
             return self.__conn.exec(cmd, envs=envs)
         
@@ -293,7 +298,8 @@ class Node(object):
         self,
         repourl: str,
         revision: str,
-        directory: Optional[str | PurePosixPath] = None
+        directory: Optional[str | PurePosixPath] = None,
+        options: Optional[str] = None
     ) -> None:
         """
         git clone 一个仓库。
@@ -301,10 +307,11 @@ class Node(object):
         :param repourl: 仓库地址。
         :param revision: 分支、tag 或 commit。
         :param directory: 克隆的目标目录。
+        :param options: git clone 命令选项。
         """
         humanish = repourl.split('/')[-1].replace('.git', '')
         directory = directory or humanish
-        self.exec(f'git clone {repourl} {directory}')
+        self.exec(f'git clone {options or ""} {repourl} {directory}')
         with self.dir(directory):
             self.exec(f'git checkout {revision}')
 
