@@ -9,7 +9,7 @@ import traceback
 
 import click
 
-from typing import List, Literal, Any, Optional, Iterable, TYPE_CHECKING
+from typing import List, Literal, Any, Optional, Iterable, TYPE_CHECKING, Union, get_args, get_origin
 from pathlib import Path
 
 from filelock import FileLock
@@ -65,7 +65,21 @@ class Pipeline(object):
         """
         流水线参数表。
         """
-        pass
+        def __init__(self, **data):
+            data = self.__set_default_values(**data)
+            super().__init__(**data)
+
+        def __set_default_values(self, **data) -> dict:
+            """
+            为 Optional 类型但未设置 default 的参数补充默认值 None。
+            """
+            for field_name, field_info in self.__class__.model_fields.items():
+                field_type = field_info.annotation
+                origin = get_origin(field_type)
+                args = get_args(field_type)
+                if origin is Union and type(None) in args and field_name not in data:
+                    data[field_name] = None
+            return data
 
     def __init__(
         self, 

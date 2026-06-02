@@ -297,7 +297,7 @@ class Node(object):
     def git(
         self,
         repourl: str,
-        revision: str,
+        revision: Optional[str] = None,
         directory: Optional[str | PurePosixPath] = None,
         options: Optional[str] = None
     ) -> None:
@@ -312,8 +312,9 @@ class Node(object):
         humanish = repourl.split('/')[-1].replace('.git', '')
         directory = directory or humanish
         self.exec(f'git clone {options or ""} {repourl} {directory}')
-        with self.dir(directory):
-            self.exec(f'git checkout {revision}')
+        if revision:
+            with self.dir(directory):
+                self.exec(f'git checkout {revision}')
 
 
 class NativeNode(Node):

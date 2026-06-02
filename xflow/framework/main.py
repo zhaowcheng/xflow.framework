@@ -33,8 +33,9 @@ class RunGroup(click.Group):
         :param projdir:  项目目录。
         :param pplname: pipeline 名称。
         """
-        if '.' not in sys.path:
-            sys.path.insert(0, '.')
+        projdir = str(Path(projdir).resolve())
+        if projdir not in sys.path:
+            sys.path.insert(0, projdir)
         os.chdir(projdir)
         pplmod = import_module(f'pipelines.{pplname}')
         pplcls: Type[Pipeline] = getattr(pplmod, pplname)
