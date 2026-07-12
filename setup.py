@@ -23,9 +23,8 @@ def find_requires():
     
 
 def find_long_description():
-    desc = ''
     with open('README.md', encoding='utf8') as f:
-        desc += ''.join(f.readlines()[6:])
+        desc = f.read()
     desc = desc.replace('/blob/master/',
                         f'/blob/v{find_version()}/')
     return desc
@@ -40,7 +39,7 @@ setup(
     author='zhaowcheng',
     author_email='zhaowcheng@163.com',
     install_requires=find_requires(),
-    packages=find_namespace_packages(),
+    packages=find_namespace_packages(exclude=['tests', 'tests.*']),
     entry_points={
         'console_scripts': [
             'xflow = xflow.framework.main:main'
