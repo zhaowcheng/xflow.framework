@@ -1,5 +1,0 @@
-recursive-include xflow/framework/statics *
-prune tests
-global-exclude *.py[cod]
-include requirements.txt
-include README*
