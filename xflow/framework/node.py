@@ -7,7 +7,6 @@ import os
 import shutil
 import inspect
 import tempfile
-import shlex
 
 from pathlib import PurePosixPath, Path
 
@@ -18,7 +17,6 @@ from xflow.framework.ssh import SSHConnection
 from xflow.framework.container import ContainerConnection
 from xflow.framework.ssh import CommandResult
 from xflow.framework.pipeline import Pipeline
-from xflow.framework.script_dependencies import collect_scripts
 
 
 class Node(object):
@@ -198,22 +196,6 @@ class Node(object):
         >>> exec('ls /home')  # successful                              # doctest: +SKIP
         >>> exec('ls /errpath')  # CommandError                         # doctest: +SKIP
         """
-        return self.__exec(cmd, envs, self.cwd)
-
-    def __exec(
-        self,
-        cmd: str,
-        envs: Optional[Dict[str, str]],
-        cwd: PurePosixPath
-    ) -> CommandResult:
-        """
-        在指定目录执行命令，保留 nix 环境包装。
-
-        :param cmd: 被执行的命令。
-        :param envs: 环境变量。
-        :param cwd: 本次命令的执行目录。
-        :return: 命令输出。
-        """
         if self.__nixenv:
             flake = self.__nixenv['flake']
             system = self.__nixenv['system']
@@ -225,7 +207,7 @@ class Node(object):
                 attr = name
             options = (options or '') + f' --log-format raw -c {cmd}'
             cmd = f'nix develop {flake}#{attr} {options.strip()}'
-        with self.__conn.dir(cwd):
+        with self.__conn.dir(self.cwd):
             return self.__conn.exec(cmd, envs=envs)
         
     def exec_script(
@@ -235,9 +217,9 @@ class Node(object):
         envs: Optional[Dict[str, str]] = None
     ) -> CommandResult:
         """
-        静态解析并交付依赖，在脚本根目录执行目标脚本。
+        上传并执行脚本。
 
-        :param script: 本地脚本路径（相对进程工作目录），父目录为脚本根目录。
+        :param script: 本地脚本路径（相对项目目录）。
         :param argstr: 脚本参数。
         :param envs: 环境变量。
         :return: 脚本输出。
@@ -248,19 +230,15 @@ class Node(object):
         >>> exec_script('scripts/my_script.sh')                         # doctest: +SKIP
         """
         lscript = Path(script).absolute()
-        scripts = collect_scripts(lscript)
-        root = lscript.parent
-        rroot = self.scriptdir
-        for local in scripts:
-            remote = rroot.joinpath(local.relative_to(root).as_posix())
-            if not self.exists(remote):
-                if not self.exists(remote.parent):
-                    self.__conn.exec(f'mkdir -p {shlex.quote(str(remote.parent))}')
-                self.putfile(local, remote.parent)
-            self.__conn.exec(f'chmod +x {shlex.quote(str(remote))}')
-        rscript = rroot.joinpath(lscript.name)
-        return self.__exec(f'{shlex.quote(str(rscript))} {argstr}', envs, rroot)
-
+        rscript = self.scriptdir.joinpath(lscript.name)
+        rdir = rscript.parent
+        if not self.exists(rscript):
+            if not self.exists(rdir):
+                self.__conn.exec(f'mkdir -p {rdir}')
+            self.putfile(lscript, rdir)
+            self.__conn.exec(f'chmod +x {rscript}')
+        return self.exec(f'{rscript} {argstr}', envs=envs)
+        
     def getfile(
         self, 
         rfile: Union[str, PurePosixPath], 
