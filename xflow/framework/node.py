@@ -3,7 +3,6 @@
 """
 节点。
 """
-import os
 import shutil
 import inspect
 import tempfile
@@ -140,11 +139,12 @@ class Node(object):
         >>> d                            # doctest: +SKIP
         '/my/workdir'                    # doctest: +SKIP
         """
+        oldcwd = self.__cwd
         try:
             self.__cwd = PurePosixPath(path)
             yield
         finally:
-            self.__cwd = PurePosixPath('')
+            self.__cwd = oldcwd
 
     @contextmanager
     def nixenv(
@@ -209,35 +209,6 @@ class Node(object):
             cmd = f'nix develop {flake}#{attr} {options.strip()}'
         with self.__conn.dir(self.cwd):
             return self.__conn.exec(cmd, envs=envs)
-        
-    def exec_script(
-        self,
-        script: str | Path,
-        argstr: str = '',
-        envs: Optional[Dict[str, str]] = None
-    ) -> CommandResult:
-        """
-        上传并执行脚本。
-
-        :param script: 本地脚本路径（相对项目目录）。
-        :param argstr: 脚本参数。
-        :param envs: 环境变量。
-        :return: 脚本输出。
-
-        :raises: 
-            `CommandError` -- 返回码不为 0。
-
-        >>> exec_script('scripts/my_script.sh')                         # doctest: +SKIP
-        """
-        lscript = Path(script).absolute()
-        rscript = self.scriptdir.joinpath(lscript.name)
-        rdir = rscript.parent
-        if not self.exists(rscript):
-            if not self.exists(rdir):
-                self.__conn.exec(f'mkdir -p {rdir}')
-            self.putfile(lscript, rdir)
-            self.__conn.exec(f'chmod +x {rscript}')
-        return self.exec(f'{rscript} {argstr}', envs=envs)
         
     def getfile(
         self, 
@@ -389,4 +360,3 @@ class ContainerNode(Node):
                                    clientkey=clientkey, 
                                    envs=envs)
         super().__init__(name, user, bwd, conn, envs=envs)
-    

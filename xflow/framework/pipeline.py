@@ -94,13 +94,16 @@ class Pipeline(object):
         :param nodename: 执行节点名称。
         :param options: 流水线参数。
         """
-        self.projdir = Path(projdir)
+        self.projdir = Path(projdir).absolute()
         self.bwd = self.projdir.joinpath('workdir')  # base workdir
         self.env = env
         self.node = self.env.get_node(nodename)
         self.options = options
         self.result: TResult = None
         self.buildid: int = None
+        from scripts import Scripts
+        self.scriptdir = self.projdir.joinpath('scripts')
+        self.scripts = Scripts(self.node)
 
     @property
     def name(self) -> str:

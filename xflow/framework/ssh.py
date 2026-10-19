@@ -310,11 +310,12 @@ class SSHConnection(object):
         >>> d                            # doctest: +SKIP
         '/my/workdir'                    # doctest: +SKIP
         """
+        oldcwd = self._cwd
         try:
             self._cwd = str(path)
             yield
         finally:
-            self._cwd = ''
+            self._cwd = oldcwd
 
     @autopen()
     def getfile(

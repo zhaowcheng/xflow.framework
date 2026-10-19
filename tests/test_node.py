@@ -1,11 +1,14 @@
 import tempfile
 import unittest
+import shlex
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from xflow.framework.node import Node
 from xflow.framework.pipeline import Pipeline
 from xflow.framework.ssh import CommandResult
+from xflow.framework.errors import CommandError
+from tests.project_imports import use_project
 
 
 class FakeConnection:
@@ -19,7 +22,9 @@ class FakeConnection:
         self.putfile_calls = []
         self.remove_calls = []
         self.existing = set()
+        self.exists_calls = []
         self.uploaded_text = {}
+        self.failing_commands = set()
 
     @contextmanager
     def dir(self, path):
@@ -33,8 +38,10 @@ class FakeConnection:
 
     def exec(self, cmd, envs=None):
         self.exec_calls.append((cmd, envs, self.current_dir))
+        if cmd in self.failing_commands:
+            raise CommandError(cmd)
         if cmd.startswith("mkdir -p "):
-            self.existing.add(cmd.removeprefix("mkdir -p "))
+            self.existing.add(shlex.split(cmd)[-1])
         return CommandResult("ok", rc=0, cmd=cmd)
 
     def getfile(self, rfile, ldir):
@@ -52,6 +59,7 @@ class FakeConnection:
             pass
 
     def exists(self, path):
+        self.exists_calls.append(str(path))
         return str(path) in self.existing
 
     def remove(self, force=False):
@@ -77,9 +85,62 @@ class NodeTest(unittest.TestCase):
         node = Node("local", "builder", "/base", conn)
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name).joinpath('scripts')
+        root.mkdir()
+        root.joinpath('__init__.py').write_text(
+            'from xflow.framework.scripts import Scripts as BaseScripts\n'
+            'class Scripts(BaseScripts):\n    DEPS = {}\n'
+        )
+        use_project(self, tmpdir.name)
         pipeline = DummyPipeline(tmpdir.name, FakeEnv(node), "local", DummyPipeline.Options())
         pipeline.buildid = 42
         return node, conn, pipeline
+
+    def test_nested_directories_restore_outer_and_initial_workdirs(self):
+        node, conn, pipeline = self.make_node_and_pipeline()
+
+        with node.dir('outer'):
+            with node.dir('inner'):
+                node.exec('pwd')
+            node.exec('pwd')
+        node.exec('pwd')
+
+        self.assertEqual([call[2] for call in conn.exec_calls], [
+            '/base/DummyPipeline/42/inner',
+            '/base/DummyPipeline/42/outer',
+            '/base/DummyPipeline/42',
+        ])
+
+    def test_failed_command_restores_nested_directories(self):
+        node, conn, pipeline = self.make_node_and_pipeline()
+        conn.failing_commands.add('false')
+
+        with node.dir('/outer'):
+            with self.assertRaises(CommandError):
+                with node.dir('/inner'):
+                    node.exec('false')
+            node.exec('pwd')
+        node.exec('pwd')
+
+        self.assertEqual([call[2] for call in conn.exec_calls], [
+            '/inner', '/outer', '/base/DummyPipeline/42',
+        ])
+
+    def test_context_exception_restores_nested_directories(self):
+        node, conn, pipeline = self.make_node_and_pipeline()
+
+        with self.assertRaisesRegex(RuntimeError, 'context failed'):
+            with node.dir('/outer'):
+                with self.assertRaisesRegex(RuntimeError, 'inner failed'):
+                    with node.dir('/inner'):
+                        raise RuntimeError('inner failed')
+                node.exec('pwd')
+                raise RuntimeError('context failed')
+        node.exec('pwd')
+
+        self.assertEqual([call[2] for call in conn.exec_calls], [
+            '/outer', '/base/DummyPipeline/42',
+        ])
 
     def test_cwd_uses_current_pipeline_and_dir_context(self):
         node, _, pipeline = self.make_node_and_pipeline()
@@ -135,22 +196,6 @@ class NodeTest(unittest.TestCase):
         self.assertEqual(conn.exec_calls[1][0], "pwd")
         self.assertIs(pipeline.node, node)
 
-    def test_exec_script_uploads_missing_script_once(self):
-        node, conn, pipeline = self.make_node_and_pipeline()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            script = Path(tmpdir).joinpath("build.sh")
-            script.write_text("#!/bin/sh\necho ok\n")
-
-            node.exec_script(script, "arg1")
-            node.exec_script(script, "arg2")
-
-        remote_script = "/base/DummyPipeline/42/scripts/build.sh"
-        self.assertEqual(conn.exec_calls[0][0], "mkdir -p /base/DummyPipeline/42/scripts")
-        self.assertEqual(conn.exec_calls[1][0], f"chmod +x {remote_script}")
-        self.assertEqual(conn.exec_calls[2][0], f"{remote_script} arg1")
-        self.assertEqual(conn.exec_calls[3][0], f"{remote_script} arg2")
-        self.assertEqual(len(conn.putfile_calls), 1)
-        self.assertIs(pipeline.node, node)
 
     def test_file_helpers_delegate_to_connection(self):
         node, conn, pipeline = self.make_node_and_pipeline()

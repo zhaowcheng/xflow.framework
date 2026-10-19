@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xflow.framework.pipeline import Pipeline
+from tests.project_imports import use_project
 
 
 class FakeNode:
@@ -45,6 +46,13 @@ class PipelineTest(unittest.TestCase):
             tmpdir = tempfile.TemporaryDirectory()
             self.addCleanup(tmpdir.cleanup)
             projdir = tmpdir.name
+        scripts = Path(projdir).joinpath('scripts')
+        scripts.mkdir(exist_ok=True)
+        scripts.joinpath('__init__.py').write_text(
+            'from xflow.framework.scripts import Scripts as BaseScripts\n'
+            'class Scripts(BaseScripts):\n    DEPS = {}\n'
+        )
+        use_project(self, projdir)
         pipeline = pipeline_cls(projdir, FakeEnv(node), "local", pipeline_cls.Options())
         return pipeline, node
 

@@ -222,11 +222,12 @@ class ContainerConnection(object):
         >>> d                            # doctest: +SKIP
         '/my/workdir'                    # doctest: +SKIP
         """
+        oldcwd = self._cwd
         try:
             self._cwd = str(path)
             yield
         finally:
-            self._cwd = ''
+            self._cwd = oldcwd
 
     @autopen()
     def getfile(
@@ -276,7 +277,7 @@ class ContainerConnection(object):
         rfile = rdir.joinpath(lfile.name)
         print(f'[{self._connstr}] Put {lfile} => {rfile}')
         stream = io.BytesIO()
-        with tarfile.open(fileobj=stream, mode='w') as tar:
+        with tarfile.open(fileobj=stream, mode='w', dereference=True) as tar:
             tarinfo = tar.gettarinfo(str(lfile), arcname=lfile.name)
             tarinfo.uid = self._uid
             with open(lfile, 'rb') as f:
